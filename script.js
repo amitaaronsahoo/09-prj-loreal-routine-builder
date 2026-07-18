@@ -1,39 +1,50 @@
 const WORKER_URL = "https://spring-heart-3a64.amitaaronsahoo.workers.dev"; 
 
+// Let the array accept whatever structure the original JSON has
 let products = [];
 let selectedProducts = JSON.parse(localStorage.getItem('loreal_selected')) || [];
 let chatHistory = [
     { role: "system", content: "You are an expert L'Oréal Beauty Advisor. Provide tailored routines based on the user's selected products. Only answer questions related to skincare, haircare, makeup, and fragrance. Use web search to pull the most up-to-date links or tips for L'Oréal products if needed." }
 ];
 
-const elements = {
-    grid: document.getElementById('product-grid'),
-    search: document.getElementById('product-search'),
-    category: document.getElementById('category-filter'),
-    selectedList: document.getElementById('selected-list'),
-    clearAll: document.getElementById('clear-all'),
-    genRoutineBtn: document.getElementById('generate-routine'),
-    chatWindow: document.getElementById('chat-window'),
-    chatInput: document.getElementById('chat-input'),
-    sendMsgBtn: document.getElementById('send-msg'),
-    rtlToggle: document.getElementById('rtl-toggle')
-};
+const elements = {};
 
-// Initialize
+// 1. Wait for HTML to load before grabbing elements to guarantee the UI works
+document.addEventListener('DOMContentLoaded', () => {
+    elements.grid = document.getElementById('product-grid');
+    elements.search = document.getElementById('product-search');
+    elements.category = document.getElementById('category-filter');
+    elements.selectedList = document.getElementById('selected-list');
+    elements.clearAll = document.getElementById('clear-all');
+    elements.genRoutineBtn = document.getElementById('generate-routine');
+    elements.chatWindow = document.getElementById('chat-window');
+    elements.chatInput = document.getElementById('chat-input');
+    elements.sendMsgBtn = document.getElementById('send-msg');
+    elements.rtlToggle = document.getElementById('rtl-toggle');
+
+    init();
+});
+
 async function init() {
+    // 2. Wire up buttons IMMEDIATELY so the RTL toggle works even if data is still loading
+    setupEventListeners();
+
     try {
         const response = await fetch('products.json');
-        products = await response.json();
+        if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
         
-        // Move this UP so listeners attach before any rendering errors can occur
-        setupEventListeners(); 
+        const rawData = await response.json();
+        // 3. Handle cases where the JSON might be wrapped in an object instead of a direct array
+        products = Array.isArray(rawData) ? rawData : (rawData.data || rawData.products || Object.values(rawData));
         
         renderGrid();
         renderSelected();
     } catch (error) {
         console.error("Error loading products:", error);
+        elements.grid.innerHTML = `<p style="grid-column: 1 / -1; color: red;"><strong>Error loading products:</strong> Check the console for details.</p>`;
     }
 }
+
 function setupEventListeners() {
     elements.search.addEventListener('input', renderGrid);
     elements.category.addEventListener('change', renderGrid);
@@ -44,47 +55,59 @@ function setupEventListeners() {
     elements.rtlToggle.addEventListener('click', toggleRTL);
 }
 
-// Render Products (Safely handles missing data)
+// 4. Ultra-flexible render function
 function renderGrid() {
+    if (!products || products.length === 0) return;
+
     const searchTerm = elements.search.value.toLowerCase();
-    const category = elements.category.value;
+    const category = elements.category.value.toLowerCase(); // Lowercase the dropdown value
 
     const filtered = products.filter(p => {
-        // Fallback to empty strings if name or description is missing from the JSON
-        const safeName = p.name ? p.name.toLowerCase() : "";
-        const safeDesc = p.description ? p.description.toLowerCase() : "";
+        // Fallbacks for various JSON key naming conventions
+        const safeName = (p.name || p.title || "").toLowerCase();
+        const safeDesc = (p.description || p.desc || "").toLowerCase();
+        const safeCat = (p.category || "").toLowerCase(); // Normalizes "Skincare" to "skincare"
         
         const matchesSearch = safeName.includes(searchTerm) || safeDesc.includes(searchTerm);
-        const matchesCategory = category === 'all' || p.category === category;
+        const matchesCategory = category === 'all' || safeCat === category;
         
         return matchesSearch && matchesCategory;
     });
 
-    elements.grid.innerHTML = filtered.map(p => `
-        <div class="product-card ${selectedProducts.some(sp => sp.id === p.id) ? 'selected' : ''}" onclick="toggleProduct('${p.id}')">
-            <img src="${p.image || 'https://placehold.co/300x300?text=No+Image'}" alt="${p.name || 'Product'}">
-            <p class="brand">${p.brand || 'Unknown Brand'}</p>
-            <h3>${p.name || 'Unnamed Product'}</h3>
-            <div class="description-overlay">${p.description || 'No description available.'}</div>
-        </div>
-    `).join('');
+    elements.grid.innerHTML = filtered.map((p, index) => {
+        // Fallback to name or array index if the original JSON doesn't have an ID
+        const identifier = p.id || p.name || p.title || `prod-${index}`;
+        // Escape quotes to prevent HTML breaking
+        const safeIdentifier = identifier.toString().replace(/'/g, "\\'"); 
+        
+        const isSelected = selectedProducts.some(sp => (sp.id || sp.name || sp.title || `prod-${index}`) === identifier);
+        
+        return `
+            <div class="product-card ${isSelected ? 'selected' : ''}" onclick="toggleProduct('${safeIdentifier}')">
+                <img src="${p.image || p.img_url || 'https://placehold.co/300x300?text=No+Image'}" alt="${p.name || p.title || 'Product'}">
+                <p class="brand">${p.brand || "L'Oréal"}</p>
+                <h3>${p.name || p.title || 'Unnamed Product'}</h3>
+                <div class="description-overlay">${p.description || p.desc || 'No description available.'}</div>
+            </div>
+        `;
+    }).join('');
 }
 
-// Select / Deselect Logic
-window.toggleProduct = function(id) {
-    const product = products.find(p => p.id === id);
-    const index = selectedProducts.findIndex(p => p.id === id);
+// 5. Select / Deselect Logic matching the flexible identifiers
+window.toggleProduct = function(identifier) {
+    const product = products.find((p, index) => (p.id || p.name || p.title || `prod-${index}`).toString() === identifier.toString());
+    const selectedIndex = selectedProducts.findIndex((p, index) => (p.id || p.name || p.title || `prod-${index}`).toString() === identifier.toString());
     
-    if (index > -1) {
-        selectedProducts.splice(index, 1);
-    } else {
+    if (selectedIndex > -1) {
+        selectedProducts.splice(selectedIndex, 1);
+    } else if (product) {
         selectedProducts.push(product);
     }
     updateStorageAndUI();
 }
 
-window.removeProduct = function(id) {
-    selectedProducts = selectedProducts.filter(p => p.id !== id);
+window.removeProduct = function(identifier) {
+    selectedProducts = selectedProducts.filter((p, index) => (p.id || p.name || p.title || `prod-${index}`).toString() !== identifier.toString());
     updateStorageAndUI();
 }
 
@@ -95,12 +118,17 @@ function updateStorageAndUI() {
 }
 
 function renderSelected() {
-    elements.selectedList.innerHTML = selectedProducts.map(p => `
-        <li>
-            <span>${p.name}</span>
-            <button class="remove-btn" onclick="removeProduct('${p.id}')">X</button>
-        </li>
-    `).join('');
+    elements.selectedList.innerHTML = selectedProducts.map((p, index) => {
+        const identifier = p.id || p.name || p.title || `prod-${index}`;
+        const safeIdentifier = identifier.toString().replace(/'/g, "\\'");
+        
+        return `
+            <li>
+                <span>${p.name || p.title}</span>
+                <button class="remove-btn" onclick="removeProduct('${safeIdentifier}')">X</button>
+            </li>
+        `;
+    }).join('');
 
     const hasProducts = selectedProducts.length > 0;
     elements.clearAll.classList.toggle('hidden', !hasProducts);
@@ -112,7 +140,7 @@ async function generateRoutine() {
     if (selectedProducts.length === 0) return;
     
     const productData = JSON.stringify(selectedProducts.map(p => ({
-        name: p.name, brand: p.brand, category: p.category, desc: p.description
+        name: p.name || p.title, brand: p.brand, category: p.category, desc: p.description || p.desc
     })));
 
     const prompt = `I have selected these products: ${productData}. Please create a step-by-step personalized routine for me. Use current web search information to give specific real-world tips about using these specific products.`;
@@ -156,7 +184,7 @@ async function fetchAIResponse(userMessage) {
 
     } catch (error) {
         document.getElementById(loadingId).innerText = "Error connecting to AI. Please try again.";
-        console.error(error);
+        console.error("Worker Error:", error);
     }
 }
 
@@ -176,5 +204,3 @@ function toggleRTL() {
     const isRTL = document.documentElement.dir === 'rtl';
     document.documentElement.dir = isRTL ? 'ltr' : 'rtl';
 }
-
-init();
