@@ -24,14 +24,16 @@ async function init() {
     try {
         const response = await fetch('products.json');
         products = await response.json();
+        
+        // Move this UP so listeners attach before any rendering errors can occur
+        setupEventListeners(); 
+        
         renderGrid();
         renderSelected();
-        setupEventListeners();
     } catch (error) {
         console.error("Error loading products:", error);
     }
 }
-
 function setupEventListeners() {
     elements.search.addEventListener('input', renderGrid);
     elements.category.addEventListener('change', renderGrid);
@@ -42,23 +44,28 @@ function setupEventListeners() {
     elements.rtlToggle.addEventListener('click', toggleRTL);
 }
 
-// Render Products 
+// Render Products (Safely handles missing data)
 function renderGrid() {
     const searchTerm = elements.search.value.toLowerCase();
     const category = elements.category.value;
 
     const filtered = products.filter(p => {
-        const matchesSearch = p.name.toLowerCase().includes(searchTerm) || p.description.toLowerCase().includes(searchTerm);
+        // Fallback to empty strings if name or description is missing from the JSON
+        const safeName = p.name ? p.name.toLowerCase() : "";
+        const safeDesc = p.description ? p.description.toLowerCase() : "";
+        
+        const matchesSearch = safeName.includes(searchTerm) || safeDesc.includes(searchTerm);
         const matchesCategory = category === 'all' || p.category === category;
+        
         return matchesSearch && matchesCategory;
     });
 
     elements.grid.innerHTML = filtered.map(p => `
         <div class="product-card ${selectedProducts.some(sp => sp.id === p.id) ? 'selected' : ''}" onclick="toggleProduct('${p.id}')">
-            <img src="${p.image}" alt="${p.name}">
-            <p class="brand">${p.brand}</p>
-            <h3>${p.name}</h3>
-            <div class="description-overlay">${p.description}</div>
+            <img src="${p.image || 'https://placehold.co/300x300?text=No+Image'}" alt="${p.name || 'Product'}">
+            <p class="brand">${p.brand || 'Unknown Brand'}</p>
+            <h3>${p.name || 'Unnamed Product'}</h3>
+            <div class="description-overlay">${p.description || 'No description available.'}</div>
         </div>
     `).join('');
 }
